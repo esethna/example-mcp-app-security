@@ -8,6 +8,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import "dotenv/config";
+import { timingSafeEqual } from "node:crypto";
 import express from "express";
 import cors from "cors";
 import {
@@ -205,6 +206,20 @@ if (isStdio) {
   const app = express();
   app.use(cors());
   app.use(express.json());
+
+  const authToken = process.env.MCP_AUTH_TOKEN;
+  if (authToken) {
+    const expected = Buffer.from(`Bearer ${authToken}`);
+    app.use("/mcp", (req, res, next) => {
+      const provided = Buffer.from(req.headers.authorization ?? "");
+      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+        res.writeHead(401).end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+      next();
+    });
+    serverLogger.info("MCP_AUTH_TOKEN set: requiring bearer token on /mcp");
+  }
 
   // Fresh McpServer + transport per request, per the MCP TS SDK's
   // stateless HTTP guidance. Heavy startup work is hoisted to
