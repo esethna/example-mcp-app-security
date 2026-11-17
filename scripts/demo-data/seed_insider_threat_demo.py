@@ -26,14 +26,15 @@ What it creates
 Times
   The incident is placed on the most recent night whose 23:40 (facility time) has passed, so
   seed on the day of a demo or recording. Facility time zone: DEMO_TZ (default
-  America/Toronto). Rules look back 40h so the alerts fire on their first run after seeding.
+  America/Regina, UTC-6 with no daylight saving). Rules look back 40h so the alerts fire on
+  their first run after seeding.
 
 Usage
   export ELASTIC_API_KEY=...            # encoded API key (the value used in "ApiKey <key>")
   export ES_URL=https://es.local:9200
   export KIBANA_URL=https://kibana.local:5601
   export KIBANA_SPACE=default           # optional
-  export DEMO_TZ=America/Toronto        # optional; facility time zone
+  export DEMO_TZ=America/Regina         # optional; facility time zone (pick one without DST)
   export ES_CA_CERT=/path/ca.crt        # optional; or ES_INSECURE=1 to skip TLS verification
 
   These can also be set in a .env file next to this script (exported variables take precedence).
@@ -81,7 +82,8 @@ LOOKUP_INDICES = (HR_INDEX, ROSTER_INDEX)
 TEMPLATE = "demo-insider"
 RANDOM_SEED = 1119
 BASELINE_DAYS = 90
-DEFAULT_TZ = "America/Toronto"
+# No daylight saving, so a fixed UTC offset in ES|QL queries is correct for the whole baseline.
+DEFAULT_TZ = "America/Regina"
 
 # (user.name, full name, employer, programs, workstation)
 SUBJECT = ("e.marsh", "Elliot Marsh", "Halvorsen Systems", ["AURORA"], "WS-0142")
@@ -126,6 +128,14 @@ RULE_IDS = {
 
 # --------------------------------------------------------------------------- HTTP
 
+def system_ca_bundle():
+    """python.org builds on macOS ship without trusted CAs; fall back to the OS bundle."""
+    cafile = ssl.get_default_verify_paths().cafile
+    if cafile and os.path.exists(cafile):
+        return None
+    return "/etc/ssl/cert.pem" if os.path.exists("/etc/ssl/cert.pem") else None
+
+
 class Client:
     def __init__(self, es_url, kb_url, api_key, space, ca_cert=None, insecure=False):
         self.es_url = es_url.rstrip("/")
@@ -135,10 +145,8 @@ class Client:
         self.space_prefix = "" if space == "default" else f"/s/{space}"
         if insecure:
             self.ctx = ssl._create_unverified_context()
-        elif ca_cert:
-            self.ctx = ssl.create_default_context(cafile=ca_cert)
         else:
-            self.ctx = ssl.create_default_context()
+            self.ctx = ssl.create_default_context(cafile=ca_cert or system_ca_bundle())
 
     def _req(self, method, url, body=None, headers=None, ndjson=False):
         h = {"Authorization": f"ApiKey {self.api_key}"}
